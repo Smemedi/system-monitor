@@ -1,11 +1,17 @@
 import re
-
+import time
 
 def Uptime():
 
     uptimeFile = open("/proc/uptime", "r")
 
-    uptime = uptimeFile.read();
+    uptimeInfo = uptimeFile.read();
+    
+    match = re.search(r"^\d+", uptimeInfo)
+    uptimeMatch = match.group()
+
+    uptime = time.strftime('%H:%M:%S', time.gmtime(int(uptimeMatch)))
+    
     print(uptime)
 
 def Memory():
