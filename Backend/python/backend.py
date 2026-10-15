@@ -61,8 +61,17 @@ def CPU(prevSnapshot: list[str], currSnapshot: list[str]):
 
 
 def Storage():
-    print("WIP")
+    drives: list[str] = []
 
+    storageFile = open("/proc/diskstats", "r")
+    storageInfo = storageFile.read()
+
+    matches = re.finditer(r"nvme\d+n\d\s.*$", storageInfo, re.MULTILINE)
+    
+    for match in matches:
+        drives.append(match.group().split())  # pyright: ignore[reportArgumentType]
+
+    print(drives)
 
 
 
