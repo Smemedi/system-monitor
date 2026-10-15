@@ -37,7 +37,7 @@ def Memory():
 
 
 
-def Snapshot():
+def CPUSnapshot():
     cpuFile = open("/proc/stat", "r")
     cpuInfo = cpuFile.read()
 
@@ -60,7 +60,11 @@ def CPU(prevSnapshot: list[str], currSnapshot: list[str]):
     print(str(cpu) + '%')
 
 
-def Storage():
+def StorageSnapshot() -> list[str]:
+    print("wip")
+
+
+def Storage(storagePrevSnapshot: list[str], storageCurrSnapshot: list[str]):
     drives: list[str] = []
 
     storageFile = open("/proc/diskstats", "r")
@@ -71,25 +75,34 @@ def Storage():
     for match in matches:
         drives.append(match.group().split())  # pyright: ignore[reportArgumentType]
 
-    print(drives)
+    for drive in drives:
+        readSpeed = 5
+        writeSpeed = 5
+
+        print(drive[0] + ":\n\t" + ""
+              )
 
 
 
-def main(prevSnapshot: list[str]):
+def main(cpuPrevSnapshot: list[str], storagePrevSnapshot: list[str]):
     while 1:
         Uptime()
         Memory()
 
-        currSnapshot = Snapshot()
-        CPU(prevSnapshot, currSnapshot)
-        prevSnapshot = currSnapshot
+        currSnapshot = CPUSnapshot()
+        CPU(cpuPrevSnapshot, currSnapshot)
+        cpuPrevSnapshot = currSnapshot
 
-        Storage()
+        storageCurrSnapshot = StorageSnapshot()
+        Storage(storagePrevSnapshot, storageCurrSnapshot)
+        storagePrevSnapshot = storageCurrSnapshot
 
         time.sleep(5)
         print('\33[4A', end='')
 
 if __name__ == "__main__":
-    prevSnapshot = Snapshot()
+    cpuPrevSnapshot = CPUSnapshot()
+    storagePrevSnapshot = StorageSnapshot()
+    
     time.sleep(3)
-    main(prevSnapshot)
+    main(cpuPrevSnapshot, storagePrevSnapshot)
