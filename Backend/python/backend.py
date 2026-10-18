@@ -60,12 +60,10 @@ def CPU(prevSnapshot: list[str], currSnapshot: list[str]):
     print(str(cpu) + '%')
 
 
-def StorageSnapshot() -> list[str]:
-    print("wip")
 
 
-def Storage(storagePrevSnapshot: list[str], storageCurrSnapshot: list[str]):
-    drives: list[str] = []
+def StorageSnapshot() -> list[list[str]]:
+    drives: list[list[str]] = []
 
     storageFile = open("/proc/diskstats", "r")
     storageInfo = storageFile.read()
@@ -73,18 +71,53 @@ def Storage(storagePrevSnapshot: list[str], storageCurrSnapshot: list[str]):
     matches = re.finditer(r"nvme\d+n\d\s.*$", storageInfo, re.MULTILINE)
     
     for match in matches:
-        drives.append(match.group().split())  # pyright: ignore[reportArgumentType]
+        drives.append(match.group().split())
 
-    for drive in drives:
-        readSpeed = 5
-        writeSpeed = 5
-
-        print(drive[0] + ":\n\t" + ""
-              )
+    return drives
 
 
+def Storage(storagePrevSnapshot: list[list[str]], storageCurrSnapshot: list[list[str]], start: float, end: float):
+    timeElapsed = end - start
 
-def main(cpuPrevSnapshot: list[str], storagePrevSnapshot: list[str]):
+    for curr, prev in zip(storageCurrSnapshot, storagePrevSnapshot):
+        driveName = curr[0]
+        readSpeed = (((int(curr[3]) - int(prev[3])) * 512) / timeElapsed) / 1000000
+        writeSpeed = (((int(curr[7]) - int(prev[7])) * 512) / timeElapsed) / 1000000
+
+        print(driveName +":\n\t" +
+            "Read: " + str(readSpeed) + "MB/s\n\t" +
+            "Write: " + str(writeSpeed) + "MB/s")
+
+
+
+
+def NetworkSnapshot():
+    networkFile = open("/proc/net/dev", "r")
+
+    networkInfo = networkFile.read()
+
+    matches = re.search(r"wlp62s0:\s.*$", networkInfo, re.MULTILINE)
+
+    return matches.group().split()  # pyright: ignore[reportOptionalMemberAccess]
+
+
+def Network(networkPrevSnapshot: list[str], networkCurrSnapshot: list[str], start: float, end: float):
+    downloadSpeed = ((int(networkCurrSnapshot[1]) - int(networkPrevSnapshot[1])) / (end - start)) / 1000000
+    uploadSpeed = ((int(networkCurrSnapshot[9]) - int(networkPrevSnapshot[9])) / (end - start)) / 1000000
+
+    print("Network speed:\n\t" +
+        "Download Speed: " + str(round(downloadSpeed, 2)) + "MB/s\n\t" +
+        "Upload Speed: " + str(round(uploadSpeed, 2)) + "MB/s")
+
+
+
+
+def main(cpuPrevSnapshot: list[str],
+         storagePrevSnapshot: list[list[str]],
+         networkPrevSnapshot: list[str]):
+
+    start = time.monotonic()
+
     while 1:
         Uptime()
         Memory()
@@ -94,15 +127,20 @@ def main(cpuPrevSnapshot: list[str], storagePrevSnapshot: list[str]):
         cpuPrevSnapshot = currSnapshot
 
         storageCurrSnapshot = StorageSnapshot()
-        Storage(storagePrevSnapshot, storageCurrSnapshot)
+        networkCurrSnapshot = NetworkSnapshot()
+        end = time.monotonic()
+        Storage(storagePrevSnapshot, storageCurrSnapshot, start, end)
+        Network(networkPrevSnapshot, networkCurrSnapshot, start, end)
+        start = end
         storagePrevSnapshot = storageCurrSnapshot
 
         time.sleep(5)
-        print('\33[4A', end='')
+        print('\33[12A', end='')
 
 if __name__ == "__main__":
     cpuPrevSnapshot = CPUSnapshot()
     storagePrevSnapshot = StorageSnapshot()
+    networkPrevSnapshot = NetworkSnapshot()
     
     time.sleep(3)
-    main(cpuPrevSnapshot, storagePrevSnapshot)
+    main(cpuPrevSnapshot, storagePrevSnapshot, networkPrevSnapshot)
