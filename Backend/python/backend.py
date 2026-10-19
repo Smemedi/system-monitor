@@ -84,9 +84,9 @@ def Storage(storagePrevSnapshot: list[list[str]], storageCurrSnapshot: list[list
         readSpeed = (((int(curr[3]) - int(prev[3])) * 512) / timeElapsed) / 1000000
         writeSpeed = (((int(curr[7]) - int(prev[7])) * 512) / timeElapsed) / 1000000
 
-        print(driveName +":\n\t" +
-            "Read: " + str(readSpeed) + "MB/s\n\t" +
-            "Write: " + str(writeSpeed) + "MB/s")
+        print(driveName[:-2] +":\n\t" +
+            "Read: " + str(round(readSpeed, 2)) + "MB/s\n\t" +
+            "Write: " + str(round(writeSpeed, 2)) + "MB/s")
 
 
 
