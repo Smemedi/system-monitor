@@ -1,4 +1,5 @@
 import { readFileSync } from 'fs';
+import { performance } from 'node:perf_hooks';
 
 function Uptime(){
 	let uptimeInfo = readFileSync("/proc/uptime", 'utf8');
@@ -29,15 +30,49 @@ function Memory(){
 
 
 
+function CPUSnapshot(){
+	let cpuInfo = readFileSync("/proc/stat", 'utf8');
+	let cpuStats = cpuInfo.match(/^cpu\s+(\d+(?:\s+\d+)*)/m)[1].split(/\s+/);
 
-async function main(){
+	return cpuStats;
+}
+
+function CPU(cpuPrevSnapshot, cpuCurrSnapshot){
+	let delta = []
+	for(let i = 0 ; i < cpuPrevSnapshot.length ; i++){
+		delta.push( cpuCurrSnapshot[i] - cpuPrevSnapshot[i] );
+	}
+	console.log(delta);
+
+	let totalJiffies = 0;
+	delta.forEach(x => {
+			totalJiffies += x;
+	});
+
+	let idleJiffies = delta[3] + delta[4];
+	let busyJiffies = totalJiffies - idleJiffies;
+
+	let cpu = ((busyJiffies / totalJiffies) * 100).toFixed(2)
+
+	console.log(cpu +"%");
+}
+
+
+async function main(cpuPrevSnapshot){
+	let start = performance.now();
+
 	while(true){
 		console.clear();
 		Uptime();
 		Memory();
 
+		let cpuCurrSnapshot = CPUSnapshot();
+		CPU(cpuPrevSnapshot, cpuCurrSnapshot);
+		cpuPrevSnapshot = cpuCurrSnapshot;
+
 		await new Promise(r => setTimeout(r, 5000));
 	}
 }
 
-main()
+let cpuPrevSnapshot = CPUSnapshot();
+main(cpuPrevSnapshot);
