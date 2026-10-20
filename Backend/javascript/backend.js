@@ -1,4 +1,5 @@
 import { readFileSync } from 'fs';
+import { time } from 'node:console';
 import { performance } from 'node:perf_hooks';
 
 function Uptime(){
@@ -42,7 +43,6 @@ function CPU(cpuPrevSnapshot, cpuCurrSnapshot){
 	for(let i = 0 ; i < cpuPrevSnapshot.length ; i++){
 		delta.push( cpuCurrSnapshot[i] - cpuPrevSnapshot[i] );
 	}
-	console.log(delta);
 
 	let totalJiffies = 0;
 	delta.forEach(x => {
@@ -58,7 +58,37 @@ function CPU(cpuPrevSnapshot, cpuCurrSnapshot){
 }
 
 
-async function main(cpuPrevSnapshot){
+
+function StorageSnapshot(){
+	let storageFile = readFileSync("/proc/diskstats", 'utf8');
+	let storageInfo = storageFile.match(/nvme\d+n\d\s.*$/mg);
+
+	let drives = [];
+
+	for(let i = 0 ; i < storageInfo.length ; i++){
+		drives.push(storageInfo[i].split(/\s+/));
+	}
+
+	return drives;
+}
+
+function Storage(storagePrevSnapshot, storageCurrSnapshot, start, end){
+	let timeElapsed = (end - start) / 1000;
+
+	for(let i = 0 ; i < storageCurrSnapshot.length ; i++){
+		let driveName = storageCurrSnapshot[i][0];
+		let readSpeed = (((storageCurrSnapshot[i][3] - storagePrevSnapshot[i][3]) * 512) / timeElapsed) / 1000000
+		let writeSpeed = (((storageCurrSnapshot[i][7] - storagePrevSnapshot[i][7]) * 512) / timeElapsed) / 1000000
+
+		console.log(driveName + ":\n\t" +
+				"Read speed: " + readSpeed.toFixed(2) + " MB/s\n\t" +
+				"Write speed: " + writeSpeed.toFixed(2) + " MB/s");
+	}
+}
+
+
+
+async function main(cpuPrevSnapshot, storagePrevSnapshot){
 	let start = performance.now();
 
 	while(true){
@@ -70,9 +100,18 @@ async function main(cpuPrevSnapshot){
 		CPU(cpuPrevSnapshot, cpuCurrSnapshot);
 		cpuPrevSnapshot = cpuCurrSnapshot;
 
+		let storageCurrSnapshot = StorageSnapshot();
+		let end = performance.now()
+
+		Storage(storagePrevSnapshot, storageCurrSnapshot, start, end);
+
+		storagePrevSnapshot = storageCurrSnapshot;
+		start = end;
+
 		await new Promise(r => setTimeout(r, 5000));
 	}
 }
 
 let cpuPrevSnapshot = CPUSnapshot();
-main(cpuPrevSnapshot);
+let storagePrevSnapshot = StorageSnapshot();
+main(cpuPrevSnapshot, storagePrevSnapshot);
