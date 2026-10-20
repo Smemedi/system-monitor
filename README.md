@@ -23,7 +23,7 @@ All three backends will aim to expose the same API endpoints and return data in 
 
 ## System Information
 
-- Linux /proc filesystem - Read system information such as CPU usage, memory, and uptime
+- Linux /proc filesystem - Read system information such as CPU usage, memory, uptime, storage read/write speeds, and network stats
 - JSON - Data format for communication between the backend and frontend
 
 ## Planned Development
