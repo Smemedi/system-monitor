@@ -1,5 +1,4 @@
 import { readFileSync } from 'fs';
-import { time } from 'node:console';
 import { performance } from 'node:perf_hooks';
 
 function Uptime(){
@@ -25,8 +24,8 @@ function Memory(){
 	let memAvailable = memInfo.match(/^MemAvailable.*?(\d+)/m);
 
 	console.log("Memory: " +
-		((memTotal[1] - memAvailable[1]) / 1048576).toFixed(2) + "GB/s / " +
-		(Number(memTotal[1] / 1048576)).toFixed(2) + "GB/s")
+		((memTotal[1] - memAvailable[1]) / 1048576).toFixed(2) + "GiB / " +
+		(Number(memTotal[1] / 1048576)).toFixed(2) + "GiB")
 }
 
 
@@ -73,12 +72,12 @@ function StorageSnapshot(){
 }
 
 function Storage(storagePrevSnapshot, storageCurrSnapshot, start, end){
-	let timeElapsed = (end - start) / 1000;
+	let timeElapsed = end - start;
 
 	for(let i = 0 ; i < storageCurrSnapshot.length ; i++){
 		let driveName = storageCurrSnapshot[i][0];
-		let readSpeed = (((storageCurrSnapshot[i][3] - storagePrevSnapshot[i][3]) * 512) / timeElapsed) / 1000000
-		let writeSpeed = (((storageCurrSnapshot[i][7] - storagePrevSnapshot[i][7]) * 512) / timeElapsed) / 1000000
+		let readSpeed = (((storageCurrSnapshot[i][3] - storagePrevSnapshot[i][3]) * 512) / timeElapsed) / 1000000;
+		let writeSpeed = (((storageCurrSnapshot[i][7] - storagePrevSnapshot[i][7]) * 512) / timeElapsed) / 1000000;
 
 		console.log(driveName + ":\n\t" +
 				"Read speed: " + readSpeed.toFixed(2) + " MB/s\n\t" +
@@ -86,10 +85,26 @@ function Storage(storagePrevSnapshot, storageCurrSnapshot, start, end){
 	}
 }
 
+function NetworkSnapshot(){
+	let networkFile = readFileSync("/proc/net/dev", 'utf8');
+	let networkInfo = networkFile.match(/wlp62s0:\s.*$/gm)[0].split(/\s+/);
+
+	return networkInfo;
+}
+
+function Network(networkPrevSnapshot, networkCurrSnapshot, start, end){
+	let downloadSpeed = ((networkCurrSnapshot[1] - networkPrevSnapshot[1]) / (end - start)) / 1000000;
+	let uploadSpeed = ((networkCurrSnapshot[9] - networkPrevSnapshot[9]) / (end - start)) / 1000000;
+
+	console.log("Network Speed: \n\t" +
+			"Download Speed: " + downloadSpeed.toFixed(2) + " MB/s\n\t" +
+			"Upload Speed: " + uploadSpeed.toFixed(2) + " MB/s");
+}
 
 
-async function main(cpuPrevSnapshot, storagePrevSnapshot){
-	let start = performance.now();
+
+async function main(cpuPrevSnapshot, storagePrevSnapshot, networkPrevSnapshot){
+	let start = performance.now() / 1000;
 
 	while(true){
 		console.clear();
@@ -101,12 +116,16 @@ async function main(cpuPrevSnapshot, storagePrevSnapshot){
 		cpuPrevSnapshot = cpuCurrSnapshot;
 
 		let storageCurrSnapshot = StorageSnapshot();
-		let end = performance.now()
+		let networkCurrSnapshot = NetworkSnapshot();
+		let end = performance.now() / 1000;
 
 		Storage(storagePrevSnapshot, storageCurrSnapshot, start, end);
+		Network(networkPrevSnapshot, networkCurrSnapshot, start, end);
 
 		storagePrevSnapshot = storageCurrSnapshot;
+		networkPrevSnapshot = networkCurrSnapshot;
 		start = end;
+
 
 		await new Promise(r => setTimeout(r, 5000));
 	}
@@ -114,4 +133,5 @@ async function main(cpuPrevSnapshot, storagePrevSnapshot){
 
 let cpuPrevSnapshot = CPUSnapshot();
 let storagePrevSnapshot = StorageSnapshot();
-main(cpuPrevSnapshot, storagePrevSnapshot);
+let networkPrevSnapshot = NetworkSnapshot();
+main(cpuPrevSnapshot, storagePrevSnapshot, networkPrevSnapshot);
