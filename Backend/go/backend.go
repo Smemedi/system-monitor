@@ -58,14 +58,62 @@ func Memory(){
 	 memoryUsed := memoryTotal - (floatTemp / 1048576);
 
 	fmt.Printf("Memory: \n\t%.2f GiB / %.2f GiB\n", memoryUsed, memoryTotal);
-
 }
 
+func CPUSnapshot() []string {
+	cpuFile, err := os.ReadFile("/proc/stat")
+	if(err != nil){
+		panic(err)
+	}
+
+	re := regexp.MustCompile(`(?m)^cpu\s+.*$`);
+	match := re.FindString(string(cpuFile));
+	jiffies := strings.Fields(match);
+
+	return jiffies;
+}
+
+func CPU(cpuPrevSnapshot[]string, cpuCurrSnapshot []string){
+
+	var delta [8]int;
+	totalJiffies := 0;
+
+	for index := 1 ; index < 9 ; index++{
+		prev, err := strconv.Atoi(cpuPrevSnapshot[index]);
+		if(err != nil){
+			panic(err)
+		}
+		curr, err := strconv.Atoi(cpuCurrSnapshot[index]);
+		if(err != nil){
+			panic(err)
+		}
+
+		delta[index - 1] =  prev - curr;
+		totalJiffies += prev - curr;
+	}	
+
+	idleJiffies := delta[3] + delta[4];
+	busyJiffies := totalJiffies - idleJiffies;
+
+	cpu := (float64(busyJiffies) / float64(totalJiffies)) * 100;
+
+	fmt.Printf("CPU:\n\t%.2f%%", cpu);
+}
+
+
+
 func main(){
+	cpuPrevSnapshot := CPUSnapshot();
+	time.Sleep(3 * time.Second);
+
 	for {
 		fmt.Print("\033[H\033[2J");
 		Uptime();
 		Memory();
+
+		cpuCurrSnapshot := CPUSnapshot();
+		CPU(cpuPrevSnapshot, cpuCurrSnapshot);
+		cpuPrevSnapshot = cpuCurrSnapshot;
 
 		time.Sleep(5 * time.Second);
 	}
