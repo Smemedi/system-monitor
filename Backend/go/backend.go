@@ -7,7 +7,12 @@ import (
 	"strings"
 	"regexp"
 	"time"
+	"bufio"
 );
+
+var(
+	bibToGiB = 1048576;
+)
 
 func Uptime(){
 	uptimeFile, err := os.ReadFile("/proc/uptime")
@@ -32,32 +37,43 @@ func Uptime(){
 
 
 func Memory(){
-	memoryFile, err := os.ReadFile("/proc/meminfo");
-	if(err != nil){
-		panic(err)
+	memoryFile, err := os.Open("/proc/meminfo");
+	if (err != nil){
+		panic(err);
 	}
 
-	re := regexp.MustCompile(`(?m)^MemTotal:.*$`);
-	match := re.FindString(string(memoryFile))
-	stringTemp := strings.Fields(match)[1];
-	floatTemp, err := strconv.ParseFloat(stringTemp, 64);
-	if(err != nil){
-		panic(err)
+	scanner := bufio.NewScanner(memoryFile);
+
+	memTotalFloat := 0.0;
+	memAvailableFloat := 0.0;
+
+	for scanner.Scan() {
+		if strings.Contains(scanner.Text(), "MemTotal:"){
+			memTotal := strings.Fields(scanner.Text())[1];
+			memTotalFloat, err = strconv.ParseFloat(memTotal, 64);
+
+			if(err != nil){
+				panic(err);
+			}
+		}
+
+		if strings.Contains(scanner.Text(), "MemAvailable:"){
+			memAvailable := strings.Fields(scanner.Text())[1];
+			memAvailableFloat, err = strconv.ParseFloat(memAvailable, 64);
+
+			if(err != nil){
+				panic(err);
+			}
+		}
 	}
 
-	memoryTotal := floatTemp / 1048576;
-
-	
-	re = regexp.MustCompile(`(?m)^MemAvailable:.*$`);
-	match = re.FindString(string(memoryFile))
-	stringTemp = strings.Fields(match)[1];
-	floatTemp, err = strconv.ParseFloat(stringTemp, 64);
-	if(err != nil){
-		panic(err)
+	if err := scanner.Err(); err != nil {
+			fmt.Println("Error reading input:", err)
 	}
-	 memoryUsed := memoryTotal - (floatTemp / 1048576);
 
-	fmt.Printf("Memory: \n\t%.2f GiB / %.2f GiB\n", memoryUsed, memoryTotal);
+	memoryUsed := (memTotalFloat - memAvailableFloat) / float64(bibToGiB);
+	fmt.Printf("Memory: \n\t%.2f Gib / %.2f GiB\n", memoryUsed, (memTotalFloat) / float64(bibToGiB));
+	memoryFile.Close();
 }
 
 func CPUSnapshot() []string {
