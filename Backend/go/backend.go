@@ -5,7 +5,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"regexp"
 	"time"
 	"bufio"
 );
@@ -13,6 +12,19 @@ import (
 var(
 	bibToGiB = 1048576;
 )
+
+type jiffies struct{
+	user int64
+	nice int64
+	system int64
+	idle int64
+	iowait int64
+	irq int64
+	softirq int64
+	steal int64
+}
+
+
 
 func Uptime(){
 	uptimeFile, err := os.ReadFile("/proc/uptime")
@@ -76,44 +88,59 @@ func Memory(){
 	memoryFile.Close();
 }
 
-func CPUSnapshot() []string {
-	cpuFile, err := os.ReadFile("/proc/stat")
-	if(err != nil){
+
+
+func parseJiffie(jiffie string) int64 {
+	parsed, err := strconv.ParseInt(jiffie, 10, 64);
+	if (err != nil){
 		panic(err)
 	}
 
-	re := regexp.MustCompile(`(?m)^cpu\s+.*$`);
-	match := re.FindString(string(cpuFile));
-	jiffies := strings.Fields(match);
-
-	return jiffies;
+	return parsed
 }
 
-func CPU(cpuPrevSnapshot[]string, cpuCurrSnapshot []string){
+func CPUSnapshot() *jiffies {
+	j := jiffies{}
+	cpuFile, err := os.Open("/proc/stat")
+	if (err != nil){
+		panic(err)
+	}
 
-	var delta [8]int;
-	totalJiffies := 0;
+	scanner := bufio.NewScanner(cpuFile)
+	scanner.Scan()
+	jiffiesString := strings.Fields(scanner.Text());
 
-	for index := 1 ; index < 9 ; index++{
-		prev, err := strconv.Atoi(cpuPrevSnapshot[index]);
-		if(err != nil){
-			panic(err)
-		}
-		curr, err := strconv.Atoi(cpuCurrSnapshot[index]);
-		if(err != nil){
-			panic(err)
-		}
+	j.user = parseJiffie(jiffiesString[1])
+	j.nice = parseJiffie(jiffiesString[2])
+	j.system = parseJiffie(jiffiesString[3])
+	j.idle = parseJiffie(jiffiesString[4])
+	j.iowait = parseJiffie(jiffiesString[5])
+	j.irq = parseJiffie(jiffiesString[6])
+	j.softirq = parseJiffie(jiffiesString[7])
+	j.steal = parseJiffie(jiffiesString[8])
 
-		delta[index - 1] =  prev - curr;
-		totalJiffies += prev - curr;
-	}	
+	defer cpuFile.Close()
+	return &j
+}
 
-	idleJiffies := delta[3] + delta[4];
-	busyJiffies := totalJiffies - idleJiffies;
+func CPU(cpuPrevSnapshot *jiffies, cpuCurrSnapshot *jiffies){
+	deltaUser := cpuCurrSnapshot.user - cpuPrevSnapshot.user
+	deltaNice := cpuCurrSnapshot.nice - cpuPrevSnapshot.nice
+	deltaSystem := cpuCurrSnapshot.system - cpuPrevSnapshot.system
+	deltaIdle := cpuCurrSnapshot.idle - cpuPrevSnapshot.idle
+	deltaIowait := cpuCurrSnapshot.iowait - cpuPrevSnapshot.iowait
+	deltaIrq := cpuCurrSnapshot.irq - cpuPrevSnapshot.irq
+	deltaSoftirq := cpuCurrSnapshot.softirq - cpuPrevSnapshot.softirq
+	deltaSteal := cpuCurrSnapshot.steal - cpuPrevSnapshot.steal
 
-	cpu := (float64(busyJiffies) / float64(totalJiffies)) * 100;
+	total := deltaUser + deltaNice + deltaSystem + deltaIdle + deltaIowait + deltaIrq + deltaSoftirq + deltaSteal
+	idleJiffies := deltaIdle + deltaIowait
+	busyJiffies := total - idleJiffies
 
-	fmt.Printf("CPU:\n\t%.2f%%", cpu);
+	cpu := (float64(busyJiffies) / float64(total)) * 100
+
+	fmt.Printf("CPU: \n\t%.2f%%", cpu)
+
 }
 
 
