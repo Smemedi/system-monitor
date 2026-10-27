@@ -11,6 +11,7 @@ import (
 
 var(
 	bibToGiB = 1048576;
+	bytetoMB = 1000000
 )
 
 type jiffies struct{
@@ -22,6 +23,12 @@ type jiffies struct{
 	irq int64
 	softirq int64
 	steal int64
+}
+
+type drive struct{
+	driveName string
+	read int64
+	write int64
 }
 
 
@@ -139,14 +146,75 @@ func CPU(cpuPrevSnapshot *jiffies, cpuCurrSnapshot *jiffies){
 
 	cpu := (float64(busyJiffies) / float64(total)) * 100
 
-	fmt.Printf("CPU: \n\t%.2f%%", cpu)
+	fmt.Printf("CPU: \n\t%.2f%%\n", cpu)
 
+}
+
+
+
+func StorageSnapshot() *[]drive{
+	drives := []drive{}
+	storageFile, err := os.Open("/proc/diskstats")
+	if (err != nil){
+		panic(err)
+	}
+
+	scanner := bufio.NewScanner(storageFile)
+
+	for scanner.Scan(){
+		fileString := strings.Fields(scanner.Text())
+		driveName := fileString[2]
+
+
+		if(driveName[len(driveName) - 2] != 'p' && driveName[:2] != "sd"){
+			read, err := strconv.ParseInt(fileString[5], 10, 64)
+			if(err != nil){
+				panic(err)
+			}
+
+			write, err := strconv.ParseInt(fileString[9], 10, 64)
+			if(err != nil){
+				panic(err)
+			}
+
+			newDrive := drive{
+			driveName: fileString[2],
+			read: read,
+			write: write,
+			}
+
+			drives = append(drives, newDrive)
+		}
+
+	}
+	if err := scanner.Err(); err != nil {
+			fmt.Println("Error reading input:", err)
+	}
+
+	return &drives
+}
+
+func Storage(storagePrevSnapshot *[]drive, storageCurrSnapshot *[]drive, start time.Time, end time.Time){
+	timeElapsed := end.Sub(start).Seconds()
+	for i := 0 ; i < len(*storageCurrSnapshot) ; i++ {
+		
+		prev := (*storagePrevSnapshot)[i]
+		curr := (*storageCurrSnapshot)[i]
+
+		readSpeed := (float64(curr.read - prev.read) * float64(512)) / timeElapsed / float64(bytetoMB)
+		writeSpeed := (float64(curr.write - prev.write) * float64(512)) / timeElapsed / float64(bytetoMB)
+
+		fmt.Printf("%s: \n\tRead Speed: %.2f MB/s\n\tWrite Speed: %.2f MB/s\n", (*storageCurrSnapshot)[i].driveName, readSpeed, writeSpeed)
+	}
 }
 
 
 
 func main(){
 	cpuPrevSnapshot := CPUSnapshot();
+	storagePrevSnapshot := StorageSnapshot();
+
+	start := time.Now()
 	time.Sleep(3 * time.Second);
 
 	for {
@@ -157,6 +225,12 @@ func main(){
 		cpuCurrSnapshot := CPUSnapshot();
 		CPU(cpuPrevSnapshot, cpuCurrSnapshot);
 		cpuPrevSnapshot = cpuCurrSnapshot;
+
+		storageCurrSnapshot := StorageSnapshot()
+		end := time.Now()
+		Storage(storagePrevSnapshot, storageCurrSnapshot, start, end)
+		start = end
+		storagePrevSnapshot = storageCurrSnapshot
 
 		time.Sleep(5 * time.Second);
 	}
