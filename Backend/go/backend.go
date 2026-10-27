@@ -1,12 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
 	"time"
-	"bufio"
 );
 
 var(
@@ -29,6 +29,11 @@ type drive struct{
 	driveName string
 	read int64
 	write int64
+}
+
+type networkData struct{
+	upload float64
+	download float64
 }
 
 
@@ -83,6 +88,7 @@ func Memory(){
 			if(err != nil){
 				panic(err);
 			}
+			break
 		}
 	}
 
@@ -191,6 +197,7 @@ func StorageSnapshot() *[]drive{
 			fmt.Println("Error reading input:", err)
 	}
 
+	defer storageFile.Close()
 	return &drives
 }
 
@@ -210,9 +217,56 @@ func Storage(storagePrevSnapshot *[]drive, storageCurrSnapshot *[]drive, start t
 
 
 
+func NetworkSnapshot() *networkData{
+	data := networkData{}
+	networkFile, err := os.Open("/proc/net/dev")
+	if(err != nil){
+		panic(err)
+	}
+	scanner := bufio.NewScanner(networkFile)
+
+	for scanner.Scan(){
+		if( scanner.Text()[:7] == "wlp62s0"){
+			networkString := strings.Fields(scanner.Text())
+
+			data.download, err = strconv.ParseFloat(networkString[1], 64)
+			if (err != nil){
+				panic(err)
+			}
+
+			data.upload, err = strconv.ParseFloat(networkString[9], 64)
+			if (err != nil){
+				panic(err)
+			}
+
+			break
+
+		}
+	}
+	if err := scanner.Err(); err != nil {
+			fmt.Println("Error reading input:", err)
+	}
+
+	defer networkFile.Close()
+	return &data
+}
+
+func Network(networkPrevSnapshot *networkData, networkCurrSnapshot *networkData, start time.Time, end time.Time){
+	timeElapsed := end.Sub(start).Seconds()
+
+	deltaUp := ((networkCurrSnapshot.upload - networkPrevSnapshot.upload) / timeElapsed) / float64(bytetoMB)
+	deltaDown := ((networkCurrSnapshot.download - networkPrevSnapshot.download) / timeElapsed) / float64(bytetoMB)
+
+	fmt.Printf("Network:\n\tUpload: %.2f MB/s\n\tDownload: %.2f MB/s\n", deltaUp, deltaDown)
+
+}
+
+
+
 func main(){
 	cpuPrevSnapshot := CPUSnapshot();
 	storagePrevSnapshot := StorageSnapshot();
+	networkPrevSnapshot := NetworkSnapshot()
 
 	start := time.Now()
 	time.Sleep(3 * time.Second);
@@ -227,10 +281,13 @@ func main(){
 		cpuPrevSnapshot = cpuCurrSnapshot;
 
 		storageCurrSnapshot := StorageSnapshot()
+		networkCurrSnapshot := NetworkSnapshot()
 		end := time.Now()
 		Storage(storagePrevSnapshot, storageCurrSnapshot, start, end)
+		Network(networkPrevSnapshot, networkCurrSnapshot, start, end)
 		start = end
 		storagePrevSnapshot = storageCurrSnapshot
+		networkPrevSnapshot = networkCurrSnapshot
 
 		time.Sleep(5 * time.Second);
 	}
