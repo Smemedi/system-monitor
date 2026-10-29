@@ -1,8 +1,19 @@
 import re
 import time
+from flask import Flask, jsonify
 
+app = Flask(__name__)
+
+class SystemMonitor:
+    def __init__(self) -> None:
+        self.cpuPrevSnapshot: list[str] = CPUSnapshot()
+        self.storagePrevSnapshot: list[list[str]]= StorageSnapshot()
+        self.storageTime: float = time.monotonic()
+        self.networkPrevSnapshot: list[str] = NetworkSnapshot()
+        self.networkTime: float = time.monotonic()
+
+@app.route('/api/uptime', methods=['GET'])
 def Uptime():
-
     uptimeFile = open("/proc/uptime", "r")
 
     uptimeInfo = uptimeFile.read();
@@ -12,42 +23,47 @@ def Uptime():
 
     uptime = time.strftime('%H:%M:%S', time.gmtime(int(uptimeMatch)))
     
-    print(uptime)
+    json_data = {
+        'uptime': uptime
+    }
+    return jsonify(json_data)
 
 
-
+@app.route('/api/memory', methods=['GET'])
 def Memory():
-    memoryFile = open("/proc/meminfo", "r")
+        memoryFile = open("/proc/meminfo", "r")
 
-    meminfo = memoryFile.read()
+        meminfo = memoryFile.read()
 
-    match = re.search(r"^MemTotal.*?(\d+)", meminfo, re.MULTILINE)
-    memTotal = int(match.group(1))  # pyright: ignore[reportOptionalMemberAccess]
+        match = re.search(r"^MemTotal.*?(\d+)", meminfo, re.MULTILINE)
+        memTotal = int(match.group(1))  # pyright: ignore[reportOptionalMemberAccess]
 
 
-    match = re.search(r"^MemAvailable.*?(\d+)", meminfo, re.MULTILINE)
-    memAvailable = int(match.group(1))  # pyright: ignore[reportOptionalMemberAccess]
-
-    print(
-        str(round((memTotal - memAvailable) / 1048576, 2))
-            + 'GB / ' +
-            str(round(memTotal / 1048576, 2))
-            + 'GB')
-
+        match = re.search(r"^MemAvailable.*?(\d+)", meminfo, re.MULTILINE)
+        memAvailable = int(match.group(1))  # pyright: ignore[reportOptionalMemberAccess]
+        json_data = {
+            'usedMem': round((memTotal - memAvailable) / 1048576, 2),
+            'memAvailable': round(memAvailable / 1048576, 2)
+        }
+        return jsonify(json_data)
 
 
 
-def CPUSnapshot():
+def CPUSnapshot() -> list[str]:
     cpuFile = open("/proc/stat", "r")
     cpuInfo = cpuFile.read()
 
     match = re.search(r"^cpu\s+(\d+(?:\s+\d+)*)", cpuInfo, re.MULTILINE)
     return match.group(1).split()  # pyright: ignore[reportOptionalMemberAccess]
 
-def CPU(prevSnapshot: list[str], currSnapshot: list[str]):
+@app.route('/api/cpu', methods=['GET'])
+def CPU():
     delta: list[int] = []
+    cpuPrevSnapshot = monitor.cpuPrevSnapshot
+    cpuCurrSnapshot = CPUSnapshot()
 
-    for curr, prev in zip(currSnapshot, prevSnapshot):
+
+    for curr, prev in zip(cpuCurrSnapshot, cpuPrevSnapshot):
         delta.append(abs(int(curr) - int(prev)))
 
     total_jiffies = sum(delta)
@@ -55,9 +71,18 @@ def CPU(prevSnapshot: list[str], currSnapshot: list[str]):
 
     busy_jiffies = total_jiffies - idle_jiffies
 
-    cpu = round((busy_jiffies / total_jiffies) * 100, 2)
+    if total_jiffies == 0:
+        cpu = 0
+    else:
+        cpu = round((busy_jiffies / total_jiffies) * 100, 2)
 
-    print(str(cpu) + '%')
+    json_data = {
+        "cpu%": cpu
+    }
+
+    monitor.cpuPrevSnapshot = cpuCurrSnapshot
+
+    return jsonify(json_data)
 
 
 
@@ -75,23 +100,34 @@ def StorageSnapshot() -> list[list[str]]:
 
     return drives
 
+@app.route('/api/storage', methods=['GET'])
+def Storage():
+    storagePrevSnapshot = monitor.storagePrevSnapshot
+    start = monitor.storageTime
+    storageCurrSnapshot = StorageSnapshot()
+    end = time.monotonic()
 
-def Storage(storagePrevSnapshot: list[list[str]], storageCurrSnapshot: list[list[str]], start: float, end: float):
     timeElapsed = end - start
+
+    drives = {}
 
     for curr, prev in zip(storageCurrSnapshot, storagePrevSnapshot):
         driveName = curr[0]
         readSpeed = (((int(curr[3]) - int(prev[3])) * 512) / timeElapsed) / 1000000
         writeSpeed = (((int(curr[7]) - int(prev[7])) * 512) / timeElapsed) / 1000000
 
-        print(driveName[:-2] +":\n\t" +
-            "Read: " + str(round(readSpeed, 2)) + "MB/s\n\t" +
-            "Write: " + str(round(writeSpeed, 2)) + "MB/s")
+        drives[driveName] = {
+            'readSpeed': round(readSpeed, 2),
+            'writeSpeed': round(writeSpeed, 2)
+        }
+
+    monitor.storagePrevSnapshot = storageCurrSnapshot
+    monitor.storageTime = end
+    return jsonify(drives)
 
 
 
-
-def NetworkSnapshot():
+def NetworkSnapshot() -> list[str]:
     networkFile = open("/proc/net/dev", "r")
 
     networkInfo = networkFile.read()
@@ -101,46 +137,28 @@ def NetworkSnapshot():
     return matches.group().split()  # pyright: ignore[reportOptionalMemberAccess]
 
 
-def Network(networkPrevSnapshot: list[str], networkCurrSnapshot: list[str], start: float, end: float):
+@app.route('/api/network', methods=['GET'])
+def Network():
+    networkPrevSnapshot = monitor.networkPrevSnapshot
+    start = monitor.networkTime
+    networkCurrSnapshot = NetworkSnapshot()
+    end = time.monotonic()
+
     downloadSpeed = ((int(networkCurrSnapshot[1]) - int(networkPrevSnapshot[1])) / (end - start)) / 1000000
     uploadSpeed = ((int(networkCurrSnapshot[9]) - int(networkPrevSnapshot[9])) / (end - start)) / 1000000
 
-    print("Network speed:\n\t" +
-        "Download Speed: " + str(round(downloadSpeed, 2)) + "MB/s\n\t" +
-        "Upload Speed: " + str(round(uploadSpeed, 2)) + "MB/s")
+    json_data = {
+        'downloadSpeed': round(downloadSpeed, 2),
+        'uploadSpeed': round(uploadSpeed, 2)
+    }
 
+    monitor.networkPrevSnapshot = networkCurrSnapshot
+    monitor.networkTime = end
 
+    return jsonify(json_data)
 
-
-def main(cpuPrevSnapshot: list[str],
-         storagePrevSnapshot: list[list[str]],
-         networkPrevSnapshot: list[str]):
-
-    start = time.monotonic()
-
-    while 1:
-        Uptime()
-        Memory()
-
-        currSnapshot = CPUSnapshot()
-        CPU(cpuPrevSnapshot, currSnapshot)
-        cpuPrevSnapshot = currSnapshot
-
-        storageCurrSnapshot = StorageSnapshot()
-        networkCurrSnapshot = NetworkSnapshot()
-        end = time.monotonic()
-        Storage(storagePrevSnapshot, storageCurrSnapshot, start, end)
-        Network(networkPrevSnapshot, networkCurrSnapshot, start, end)
-        start = end
-        storagePrevSnapshot = storageCurrSnapshot
-
-        time.sleep(5)
-        print('\33[12A', end='')
 
 if __name__ == "__main__":
-    cpuPrevSnapshot = CPUSnapshot()
-    storagePrevSnapshot = StorageSnapshot()
-    networkPrevSnapshot = NetworkSnapshot()
+    monitor = SystemMonitor()
+    app.run()
     
-    time.sleep(3)
-    main(cpuPrevSnapshot, storagePrevSnapshot, networkPrevSnapshot)
