@@ -1,5 +1,20 @@
 import { readFileSync } from 'fs';
 import { performance } from 'node:perf_hooks';
+import express from 'express';
+
+const app = express();
+const port = 8080;
+
+
+class SystemMonitor {
+	constructor() {
+		this.cpuPrevSnapshot = CPUSnapshot();
+		this.storagePrevSnapshot = StorageSnapshot();
+		this.storageTime = performance.now();
+		this.networkPrevSnapshot = NetworkSnapshot();
+		this.networkTime = performance.now();
+	}
+}
 
 function Uptime(){
 	let uptimeInfo = readFileSync("/proc/uptime", 'utf8');
@@ -12,7 +27,7 @@ function Uptime(){
 	uptime[0] = uptime[0] % 60
 	let seconds = uptime[0]
 
-	console.log(hours + ":" + String(minutes).padStart(2, '0') + ":" + String(seconds).padStart(2, '0'))
+	return(hours + ":" + String(minutes).padStart(2, '0') + ":" + String(seconds).padStart(2, '0'))
 }
 
 
@@ -23,9 +38,10 @@ function Memory(){
 	let memTotal = memInfo.match(/^MemTotal.*?(\d+)/m);
 	let memAvailable = memInfo.match(/^MemAvailable.*?(\d+)/m);
 
-	console.log("Memory: " +
-		((memTotal[1] - memAvailable[1]) / 1048576).toFixed(2) + "GiB / " +
-		(Number(memTotal[1] / 1048576)).toFixed(2) + "GiB")
+	return {
+		"used": ((memTotal[1] - memAvailable[1]) / 1048576).toFixed(2),
+		"total": (memTotal[1] / 1048576).toFixed(2)
+	};
 }
 
 
@@ -37,8 +53,11 @@ function CPUSnapshot(){
 	return cpuStats;
 }
 
-function CPU(cpuPrevSnapshot, cpuCurrSnapshot){
-	let delta = []
+function CPU(){
+	let delta = [];
+	let cpuPrevSnapshot = monitor.cpuPrevSnapshot
+	let cpuCurrSnapshot = CPUSnapshot();
+
 	for(let i = 0 ; i < cpuPrevSnapshot.length ; i++){
 		delta.push( cpuCurrSnapshot[i] - cpuPrevSnapshot[i] );
 	}
@@ -51,9 +70,11 @@ function CPU(cpuPrevSnapshot, cpuCurrSnapshot){
 	let idleJiffies = delta[3] + delta[4];
 	let busyJiffies = totalJiffies - idleJiffies;
 
-	let cpu = ((busyJiffies / totalJiffies) * 100).toFixed(2)
+	let cpu = ((busyJiffies / totalJiffies) * 100).toFixed(2);
 
-	console.log(cpu +"%");
+	monitor.cpuPrevSnapshot = cpuCurrSnapshot;
+
+	return cpu;
 }
 
 
@@ -71,18 +92,31 @@ function StorageSnapshot(){
 	return drives;
 }
 
-function Storage(storagePrevSnapshot, storageCurrSnapshot, start, end){
-	let timeElapsed = end - start;
+function Storage(){
+	let storagePrevSnapshot = monitor.storagePrevSnapshot;
+	let storageCurrSnapshot = StorageSnapshot();
+	let start = monitor.storageTime;
+	let end = performance.now();
+
+	let timeElapsed = (end - start) / 1000;
+
+	let drives = {};
 
 	for(let i = 0 ; i < storageCurrSnapshot.length ; i++){
 		let driveName = storageCurrSnapshot[i][0];
 		let readSpeed = (((storageCurrSnapshot[i][3] - storagePrevSnapshot[i][3]) * 512) / timeElapsed) / 1000000;
 		let writeSpeed = (((storageCurrSnapshot[i][7] - storagePrevSnapshot[i][7]) * 512) / timeElapsed) / 1000000;
 
-		console.log(driveName + ":\n\t" +
-				"Read speed: " + readSpeed.toFixed(2) + " MB/s\n\t" +
-				"Write speed: " + writeSpeed.toFixed(2) + " MB/s");
+		drives[driveName] = {
+			"read": readSpeed,
+			"write": writeSpeed
+		}
 	}
+
+	monitor.storagePrevSnapshot = storageCurrSnapshot;
+	monitor.storageTime = end
+
+	return drives;
 }
 
 function NetworkSnapshot(){
@@ -92,46 +126,61 @@ function NetworkSnapshot(){
 	return networkInfo;
 }
 
-function Network(networkPrevSnapshot, networkCurrSnapshot, start, end){
-	let downloadSpeed = ((networkCurrSnapshot[1] - networkPrevSnapshot[1]) / (end - start)) / 1000000;
-	let uploadSpeed = ((networkCurrSnapshot[9] - networkPrevSnapshot[9]) / (end - start)) / 1000000;
+function Network(){
+	let networkPrevSnapshot = monitor.networkPrevSnapshot;
+	let networkCurrSnapshot = NetworkSnapshot();
+	let end = performance.now();
+	let start = monitor.networkTime;
 
-	console.log("Network Speed: \n\t" +
-			"Download Speed: " + downloadSpeed.toFixed(2) + " MB/s\n\t" +
-			"Upload Speed: " + uploadSpeed.toFixed(2) + " MB/s");
+	let timeElapsed = (end - start) / 1000;
+
+	let downloadSpeed = ((networkCurrSnapshot[1] - networkPrevSnapshot[1]) / timeElapsed) / 1000000;
+	let uploadSpeed = ((networkCurrSnapshot[9] - networkPrevSnapshot[9]) / timeElapsed) / 1000000;
+
+	monitor.networkPrevSnapshot = networkCurrSnapshot;
+	monitor.networkTime = end;
+
+	return {
+		"Download Speed": downloadSpeed.toFixed(2),
+		"Upload Speed": uploadSpeed.toFixed(2)
+	};
 }
 
 
 
-async function main(cpuPrevSnapshot, storagePrevSnapshot, networkPrevSnapshot){
-	let start = performance.now() / 1000;
+const monitor = new SystemMonitor();
 
-	while(true){
-		console.clear();
-		Uptime();
-		Memory();
+app.get('/api/uptime', (_, res) => {
 
-		let cpuCurrSnapshot = CPUSnapshot();
-		CPU(cpuPrevSnapshot, cpuCurrSnapshot);
-		cpuPrevSnapshot = cpuCurrSnapshot;
+  res.json({
+			'uptime': Uptime()
+			});
+});
 
-		let storageCurrSnapshot = StorageSnapshot();
-		let networkCurrSnapshot = NetworkSnapshot();
-		let end = performance.now() / 1000;
+app.get('/api/memory', (_, res) => {
 
-		Storage(storagePrevSnapshot, storageCurrSnapshot, start, end);
-		Network(networkPrevSnapshot, networkCurrSnapshot, start, end);
+  res.json(Memory());
+});
 
-		storagePrevSnapshot = storageCurrSnapshot;
-		networkPrevSnapshot = networkCurrSnapshot;
-		start = end;
+app.get('/api/cpu', (_, res) => {
+
+  res.json({
+			'CPU': CPU()
+			});
+});
+
+app.get('/api/storage', (_, res) => {
+
+  res.json(Storage());
+});
+
+app.get('/api/network', (_, res) => {
+
+  res.json(Network());
+});
 
 
-		await new Promise(r => setTimeout(r, 5000));
-	}
-}
+app.listen(port, () => {
+  console.log(`Example app listening at http://localhost:${port}`);
+});
 
-let cpuPrevSnapshot = CPUSnapshot();
-let storagePrevSnapshot = StorageSnapshot();
-let networkPrevSnapshot = NetworkSnapshot();
-main(cpuPrevSnapshot, storagePrevSnapshot, networkPrevSnapshot);
