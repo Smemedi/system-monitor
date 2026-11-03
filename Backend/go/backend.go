@@ -7,6 +7,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"net/http"
+	"log"
+	"encoding/json"
+	"math"
 );
 
 var(
@@ -36,9 +40,19 @@ type networkData struct{
 	download float64
 }
 
+type SystemMonitor struct{
+	cpuPrevSnapshot *jiffies
+	storagePrevSnapshot *[]drive
+	storageTime time.Time
+	networkPrevSnapshot *networkData
+	networkTime time.Time
+}
 
 
-func Uptime(){
+
+func Uptime( w http.ResponseWriter, r *http.Request ){
+	w.Header().Set("Content-Type", "application/json")
+
 	uptimeFile, err := os.ReadFile("/proc/uptime")
 	if(err != nil){
 		panic(err);
@@ -54,13 +68,20 @@ func Uptime(){
 	hours := totalSeconds / 3600
 	minutes := (totalSeconds % 3600) / 60
 	seconds := totalSeconds % 60
-	fmt.Printf("Uptime: \n\t%d:%02d:%02d\n", hours, minutes, seconds);
+
+	uptimeString := fmt.Sprintf("%d:%02d:%02d", hours, minutes, seconds)
+
+	json.NewEncoder(w).Encode(map[string]string{
+			"Uptime": uptimeString,
+	})
 
 }
 
 
 
-func Memory(){
+func Memory( w http.ResponseWriter, r *http.Request ){
+	w.Header().Set("Content-Type", "application/json")
+
 	memoryFile, err := os.Open("/proc/meminfo");
 	if (err != nil){
 		panic(err);
@@ -96,9 +117,14 @@ func Memory(){
 			fmt.Println("Error reading input:", err)
 	}
 
-	memoryUsed := (memTotalFloat - memAvailableFloat) / float64(bibToGiB);
-	fmt.Printf("Memory: \n\t%.2f Gib / %.2f GiB\n", memoryUsed, (memTotalFloat) / float64(bibToGiB));
-	memoryFile.Close();
+	memoryUsed := math.Round(((memTotalFloat - memAvailableFloat) / float64(bibToGiB)) * 100) /100;
+
+	defer memoryFile.Close()
+	
+	json.NewEncoder(w).Encode(map[string]float64{
+		"Memory Used": memoryUsed,
+		"Memory Available": math.Round((memAvailableFloat / float64(bibToGiB)) * 100) / 100,
+	})
 }
 
 
@@ -136,7 +162,12 @@ func CPUSnapshot() *jiffies {
 	return &j
 }
 
-func CPU(cpuPrevSnapshot *jiffies, cpuCurrSnapshot *jiffies){
+func CPU( w http.ResponseWriter, r *http.Request, monitor *SystemMonitor ){
+	w.Header().Set("Content-Type", "application/json")
+
+	cpuPrevSnapshot := monitor.cpuPrevSnapshot
+	cpuCurrSnapshot := CPUSnapshot()
+
 	deltaUser := cpuCurrSnapshot.user - cpuPrevSnapshot.user
 	deltaNice := cpuCurrSnapshot.nice - cpuPrevSnapshot.nice
 	deltaSystem := cpuCurrSnapshot.system - cpuPrevSnapshot.system
@@ -150,9 +181,13 @@ func CPU(cpuPrevSnapshot *jiffies, cpuCurrSnapshot *jiffies){
 	idleJiffies := deltaIdle + deltaIowait
 	busyJiffies := total - idleJiffies
 
-	cpu := (float64(busyJiffies) / float64(total)) * 100
+	cpu := math.Round((float64(busyJiffies) / float64(total)) * 10000) / 100
 
-	fmt.Printf("CPU: \n\t%.2f%%\n", cpu)
+	monitor.cpuPrevSnapshot = cpuCurrSnapshot
+
+	json.NewEncoder(w).Encode(map[string]float64{
+		"CPU": cpu,
+	})
 
 }
 
@@ -201,18 +236,35 @@ func StorageSnapshot() *[]drive{
 	return &drives
 }
 
-func Storage(storagePrevSnapshot *[]drive, storageCurrSnapshot *[]drive, start time.Time, end time.Time){
+func Storage( w http.ResponseWriter, r *http.Request, monitor *SystemMonitor ){
+	w.Header().Set("Content-Type", "application/json")
+
+	storagePrevSnapshot := monitor.storagePrevSnapshot
+	storageCurrSnapshot := StorageSnapshot()
+	start := monitor.storageTime
+	end := time.Now()
+
+	storage := make(map[string]map[string]float64)
+
 	timeElapsed := end.Sub(start).Seconds()
 	for i := 0 ; i < len(*storageCurrSnapshot) ; i++ {
 		
+		driveName := (*storageCurrSnapshot)[i].driveName
 		prev := (*storagePrevSnapshot)[i]
 		curr := (*storageCurrSnapshot)[i]
 
 		readSpeed := (float64(curr.read - prev.read) * float64(512)) / timeElapsed / float64(bytetoMB)
 		writeSpeed := (float64(curr.write - prev.write) * float64(512)) / timeElapsed / float64(bytetoMB)
 
-		fmt.Printf("%s: \n\tRead Speed: %.2f MB/s\n\tWrite Speed: %.2f MB/s\n", (*storageCurrSnapshot)[i].driveName, readSpeed, writeSpeed)
+		storage[driveName] = map[string]float64{
+			"read":  readSpeed,
+			"write": writeSpeed,
+		}
 	}
+	monitor.storagePrevSnapshot = storageCurrSnapshot
+	monitor.storageTime = end
+
+	json.NewEncoder(w).Encode(storage)
 }
 
 
@@ -251,44 +303,52 @@ func NetworkSnapshot() *networkData{
 	return &data
 }
 
-func Network(networkPrevSnapshot *networkData, networkCurrSnapshot *networkData, start time.Time, end time.Time){
+func Network( w http.ResponseWriter, r *http.Request, monitor *SystemMonitor ){
+	w.Header().Set("Content-Type", "application/json")
+
+	networkPrevSnapshot := monitor.networkPrevSnapshot
+	networkCurrSnapshot := NetworkSnapshot()
+	start := monitor.networkTime
+	end := time.Now()
+
 	timeElapsed := end.Sub(start).Seconds()
 
 	deltaUp := ((networkCurrSnapshot.upload - networkPrevSnapshot.upload) / timeElapsed) / float64(bytetoMB)
 	deltaDown := ((networkCurrSnapshot.download - networkPrevSnapshot.download) / timeElapsed) / float64(bytetoMB)
 
-	fmt.Printf("Network:\n\tUpload: %.2f MB/s\n\tDownload: %.2f MB/s\n", deltaUp, deltaDown)
+	monitor.networkPrevSnapshot = networkCurrSnapshot
+	monitor.networkTime = end
+
+	json.NewEncoder(w).Encode(map[string]float64{
+		"Upload Speed": deltaUp,
+		"Download Speed": deltaDown,
+	})
 
 }
 
 
 
 func main(){
-	cpuPrevSnapshot := CPUSnapshot();
-	storagePrevSnapshot := StorageSnapshot();
-	networkPrevSnapshot := NetworkSnapshot()
 
-	start := time.Now()
-	time.Sleep(3 * time.Second);
-
-	for {
-		fmt.Print("\033[H\033[2J");
-		Uptime();
-		Memory();
-
-		cpuCurrSnapshot := CPUSnapshot();
-		CPU(cpuPrevSnapshot, cpuCurrSnapshot);
-		cpuPrevSnapshot = cpuCurrSnapshot;
-
-		storageCurrSnapshot := StorageSnapshot()
-		networkCurrSnapshot := NetworkSnapshot()
-		end := time.Now()
-		Storage(storagePrevSnapshot, storageCurrSnapshot, start, end)
-		Network(networkPrevSnapshot, networkCurrSnapshot, start, end)
-		start = end
-		storagePrevSnapshot = storageCurrSnapshot
-		networkPrevSnapshot = networkCurrSnapshot
-
-		time.Sleep(5 * time.Second);
+	monitor := SystemMonitor{
+		cpuPrevSnapshot: CPUSnapshot(),
+		storagePrevSnapshot: StorageSnapshot(),
+		storageTime: time.Now(),
+		networkPrevSnapshot: NetworkSnapshot(),
+		networkTime: time.Now(),
 	}
+
+	http.HandleFunc("/api/uptime", Uptime)
+	http.HandleFunc("/api/memory", Memory)
+	http.HandleFunc("/api/cpu", func(w http.ResponseWriter, r *http.Request) {
+			CPU(w, r, &monitor)
+	})
+	http.HandleFunc("/api/storage", func(w http.ResponseWriter, r *http.Request) {
+			Storage(w, r, &monitor)
+	})
+	http.HandleFunc("/api/network", func(w http.ResponseWriter, r *http.Request) {
+			Network(w, r, &monitor)
+	})
+  log.Fatal(http.ListenAndServe(":8080", nil))
+	
 }
